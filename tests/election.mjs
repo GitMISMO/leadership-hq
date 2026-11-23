@@ -1,0 +1,98 @@
+// Runs made-up elections through the real Leadership HQ code (tests/app.html, the same code as index.html
+// without the sign-in) in a browser, and checks the counting rules. No real records are used.
+import { chromium } from 'playwright';
+import path from 'node:path';
+const b = await chromium.launch(); const p = await b.newPage(); const errs = [];
+p.on('pageerror', e => errs.push(e.message));
+await p.addInitScript(() => { const store = {}; window.claude = { use: async k => k === 'db' ? { collection: c => ({ onSnapshot: cb => cb({ docs: [] }), doc: id => ({ set: async d => { store[c + '/' + id] = d; }, delete: async () => { delete store[c + '/' + id]; } }) }) } : null }; });
+await p.goto('file://' + path.resolve('tests/app.html')); await p.waitForTimeout(1500);
+const r = await p.evaluate(async () => {
+  const res = {}; const ok = (name, cond) => { res[name] = !!cond; };
+  /* a workgroup election: two Co-Chair seats, closes noon ET Nov 13 */
+  S.cycles['wg-t'] = { id: 'wg-t', type: 'wg', year: 2026, group: 'Test DWG', closeTime: '12:00', dates: { ballotOpen: '2026-11-09', ballotClose: '2026-11-13' } };
+  S.seats = { 'wg-t__co-chair': { id: 'wg-t__co-chair', cycle: 'wg-t', group: 'Test DWG', position: 'Co-Chair', count: 2 } };
+  S.nominations = { a: { id: 'a', cycle: 'wg-t', seat: 'wg-t__co-chair', status: 'confirmed', first: 'Ann', last: 'A' }, b: { id: 'b', cycle: 'wg-t', seat: 'wg-t__co-chair', status: 'confirmed', first: 'Bo', last: 'B' }, c: { id: 'c', cycle: 'wg-t', seat: 'wg-t__co-chair', status: 'confirmed', first: 'Cy', last: 'C' } };
+  const V = (id, co, ch, at, x) => Object.assign({ id, cycle: 'wg-t', group: 'Test DWG', voter: { company: co, email: id + '@example.com' }, choices: { 'wg-t__co-chair': ch }, submittedAt: at, receivedAt: at }, x || {});
+  S.votes = { v1: V('v1', 'Acme', ['a', 'a', 'a', 'b', 'c'], '2026-11-10T15:00:00.000Z'), v2: V('v2', 'Beta', ['c'], '2026-11-13T17:05:00.000Z'), v3: V('v3', 'Gamma', ['c'], '2026-11-13T17:04:00.000Z', { submittedAt: '2026-11-13T16:59:00.000Z' }), v4: V('v4', 'Delta', ['b'], '2026-11-10T15:00:00.000Z', { via: 'Leadership HQ preview' }), v5: V('v5', 'Eps', ['b'], '2026-11-08T15:00:00.000Z') };
+  S.voteflags = {};
+  const c = S.cycles['wg-t']; const st = voteStatus(c); const t = tally(c)['wg-t__co-chair'];
+  ok('repeated picks count once and never more than the seats', t.a === 1 && t.b === 1);
+  ok('ballot sent just before the close counts (grace)', st.v3.k === 'counted');
+  ok('late ballot is set aside', st.v2.k === 'excluded');
+  ok('early ballot is set aside', st.v5.k === 'excluded');
+  ok('staff preview is set aside', st.v4.k === 'excluded');
+  ok('workgroup elections stay out of the election year', (CY = null, curYear() !== 2026));
+  /* a Business Domain election with personal links */
+  S.cycles['2099-domain'] = { id: '2099-domain', type: 'domain', year: 2099, voterList: 'mvr', dates: { ballotOpen: '2026-11-01', ballotClose: '2026-11-05' } };
+  S.seats['d1'] = { id: 'd1', cycle: '2099-domain', group: 'Origination', position: 'Chair', count: 1 };
+  S.nominations.x = { id: 'x', seat: 'd1', cycle: '2099-domain', status: 'confirmed', first: 'X', last: 'X' }; S.nominations.y = { id: 'y', seat: 'd1', cycle: '2099-domain', status: 'confirmed', first: 'Y', last: 'Y' };
+  S.voters = { r: { id: 'r', list: 'mvr', email: 'r@bank.example', company: 'Example Bank', role: 'MVR', code: 'RCODE00001' }, m: { id: 'm', list: 'mvr', email: 'm@bank.example', company: 'Example Bank', role: 'MVA', code: 'MCODE00001' }, z: { id: 'z', list: 'mvr', email: 'z@zeta.example', company: 'Zeta', role: 'MVR', code: 'ZCODE00001' } };
+  const D = (id, co, code, email, ch, at) => ({ id, cycle: '2099-domain', group: 'All Business Domains', voter: { company: co, email }, code, choices: { d1: ch }, submittedAt: at, receivedAt: at });
+  Object.assign(S.votes, { d1v: D('d1v', 'Example Bank Mortgage', 'RCODE00001', 'r@bank.example', ['x'], '2026-11-02T15:00:00.000Z'), d2v: D('d2v', 'Example Bank NA', 'MCODE00001', 'm@bank.example', ['y'], '2026-11-02T16:00:00.000Z'), d3v: D('d3v', 'Zeta', 'ZCODE00001', 'z@zeta.example', ['y'], '2026-11-02T17:00:00.000Z'), d4v: D('d4v', 'Zeta Corp', 'ZCODE00001', 'other@zeta.example', ['x'], '2026-11-02T18:00:00.000Z') });
+  const d = S.cycles['2099-domain']; const ds = voteStatus(d);
+  ok('company comes from the voter list, and the MVR counts over the MVA', ds.d1v.k === 'counted' && ds.d2v.k === 'excluded');
+  ok('a personal link counts once', ds.d3v.k === 'counted' && ds.d4v.k === 'excluded');
+  ok('results can not be finalized with a tie', finalProblems(d).some(x => /tie/.test(x)));
+  /* the flood guard */
+  S.votes.v6 = V('v6', 'Zed', ['b'], '2026-11-10T16:00:00.000Z', { rateHeld: 'same-address' });
+  ok('a ballot the flood guard held waits for staff', voteStatus(c).v6.k === 'hold');
+  delete S.votes.v6;
+  /* the Aptify voting representatives report pasted as it comes */
+  const pasted = readVoterRows('ID\tShipToCompany\tLine1_ProductName\tOther Function\tPrimary Email\tFirst Name\tLast Name\n1\tExample Bank\tMISMO Corporate Membership\tMISMO Voting Representative\tr@bank.example\tRay\tR\n1\tExample Bank\tMISMO Corporate Membership\tMISMO Voting Alternate\tm@bank.example\tMo\tM\n1\tExample Bank\tMISMO Corporate Membership\tCompany Administrator\ta@bank.example\tAl\tA');
+  ok('the Aptify report pastes as it comes, keeping only MVRs and MVAs', pasted.rows.length === 2 && pasted.skipped === 1 && pasted.rows[0].role === 'MVR' && pasted.rows[1].role === 'MVA' && pasted.rows[0].name === 'Ray R' && pasted.rows[0].company === 'Example Bank');
+  const rep = readVoterRows('Company ID\tCompany\tFirst Name\tLast Name\tPrimary Email\tOther Function\tFunction Ended\tMembership\tMembership Ends\n9229539\tAbsolute Home Mortgage Corp.\tErica\tAdams\te@ahm.example\tMISMO Voting Representative\t\tMISMO Corporate Membership\t2027-06-30\n9229539\tAbsolute Home Mortgage Corp.\tMatt\tV\tm@ahm.example\tMISMO Voting Alternate\t\tMISMO Corporate Membership\t2027-06-30');
+  ok('the LeadershipHQ_VotingReps report pastes as it comes', rep.rows.length === 2 && rep.rows[0].companyId === '9229539' && rep.rows[0].company === 'Absolute Home Mortgage Corp.' && rep.rows[1].role === 'MVA' && rep.rows[0].email === 'e@ahm.example');
+  ok('the old Name, Email, Company, Role paste still works', readVoterRows('Jane Smith\tj@x.example\tX Bank\tMVR').rows[0].role === 'MVR');
+  /* the audit trail */
+  S.voteflags.d4v = { status: 'excluded', by: 'Jonna', at: '2026-11-03T15:00:00.000Z', reason: 'Another ballot from this link' };
+  const trail = auditRows(d).map(r => r.join('|')).join('\n');
+  ok('the audit trail records each ballot and who decided what', /Ballot received from the form\|d1v/.test(trail) && /Set aside by staff\|d4v\|Jonna/.test(trail));
+  /* closing at close of business */
+  S.cycles['2098-domain'] = { id: '2098-domain', type: 'domain', year: 2098, closeTime: '17:00', nomCloseTime: '17:00', dates: { nomOpen: '2026-12-07', nomClose: '2026-12-11', ballotOpen: '2026-12-14', ballotClose: '2026-12-18' } };
+  const cb = S.cycles['2098-domain'];
+  ok('voting closes at 5 p.m. Eastern', ballotWindow(cb).closes === '2026-12-18T22:00:00.000Z');
+  ok('a ballot at 5:30 p.m. Eastern Friday is late', /after voting closed/.test(ballotWindowCheck(cb, { receivedAt: '2026-12-18T22:30:00.000Z', submittedAt: '2026-12-18T22:30:00.000Z' })));
+  ok('the emails and forms say the time', mergeText('By {{nomClose}} (midnight Eastern); voting closes at midnight Eastern on {{ballotClose}}.', cb) === 'By Friday, December 11 at 5 p.m. Eastern; voting closes on Friday, December 18 at 5 p.m. Eastern.' && slateOf(cb).closesLabel === 'Friday, December 18 at 5 p.m. Eastern');
+  delete S.cycles['2098-domain'];
+  /* Board Seat Map drag and drop */
+  S.cycles['2099-board'] = { id: '2099-board', type: 'board', year: 2099, dates: {} };
+  S.leaders = { bm1: { id: 'bm1', gtype: 'board', name: 'Pat Board', company: 'Bank P', seat: 'SF Lender', status: 'active', termEnd: '2100-12-31' }, bm2: { id: 'bm2', gtype: 'board', name: 'Lee Old', company: 'Bank L', seat: 'GSE', status: 'active', termEnd: '2098-12-31' } };
+  S.slate = {};
+  const bc = S.cycles['2099-board'];
+  await boardDrop(bc, boardPicture(bc), { mem: 'bm1', from: 'sfl' }, 'leave');
+  const ex = Object.values(S.slate).find(x => x.leader === 'bm1');
+  ok('a member dragged to Leaving goes on the slate as leaving', ex && ex.kind === 'exit' && ex.approval === 'needs' && boardPicture(bc).leaving.some(l => l.id === 'bm1'));
+  await boardDrop(bc, boardPicture(bc), { mem: 'bm1', from: 'leave' }, 'sfl');
+  ok('dragged back, the leaving item is set aside', !Object.values(S.slate).some(x => x.leader === 'bm1' && x.kind === 'exit') && !boardPicture(bc).leaving.some(l => l.id === 'bm1'));
+  await boardDrop(bc, boardPicture(bc), { mem: 'bm1', from: 'sfl' }, 'svc');
+  ok('a member dragged to another category changes seat', boardCat(S.leaders.bm1.seat) === 'svc');
+  /* the calendar-year Board list */
+  S.leaders = { b1: { id: 'b1', gtype: 'board', name: 'Tim Bowler', title: 'Chief Innovation Officer', company: 'ICE', seat: 'SF - Vendor', status: 'active', termStart: '2024-01-01', termEnd: '2027-12-31' },
+    b2: { id: 'b2', gtype: 'board', name: 'Mike Hogan', title: 'Chief Information Officer', company: 'PennyMac', seat: 'SF Lender', status: 'active', termStart: '2024-01-01', termEnd: '2027-12-31' },
+    b3: { id: 'b3', gtype: 'board', name: 'Eric Lapin', title: 'Vice President', company: 'FICO', seat: 'SF - Credit', status: 'active', seatedOn: '2026-09-01', termStart: '2027-01-01', termEnd: '2030-12-31', boardNote: 'Term starts September 2026, but the clock starts January 2027' },
+    b4: { id: 'b4', gtype: 'board', name: 'Leslie Peeler', company: 'Cenlar FSB', seat: 'SF Lender', status: 'former', termStart: '2026-01-01', termEnd: '2029-12-31' }, b7: { id: 'b7', gtype: 'board', name: 'Left Early', company: 'Y', seat: 'SF Lender', status: 'former', termStart: '2025-01-01', termEnd: '2026-09-30' },
+    b5: { id: 'b5', gtype: 'board', name: 'Brian Vieaux', company: 'MISMO', seat: 'MISMO President', status: 'active', termStart: '2025-10-01' },
+    b6: { id: 'b6', gtype: 'board', name: 'New Person', company: 'X', seat: 'At Large', status: 'active', termStart: '2027-01-01' } };
+  const bl = boardListText(2026, { asOf: '2026-11-19', chair: 'Tim Bowler', vice: 'Mike Hogan', secretary: 'Michael Briggs', treasurer: 'Alexandra Brinton' });
+  ok('the Board list is the Board as of the day it goes out, with officers and notes', /1\. CHAIR: Tim Bowler, Chief Innovation Officer, ICE/.test(bl) && /2\. VICE CHAIR: Mike Hogan/.test(bl) && /Eric Lapin/.test(bl) && /Leslie Peeler/.test(bl) && !/New Person/.test(bl) && !/Left Early/.test(bl) && /EX-OFFICIO MEMBERS\n1\. Brian Vieaux/.test(bl) && /BOARD SECRETARY: Michael Briggs/.test(bl) && /clock starts January 2027/.test(bl));
+  /* the weekly voter list from Aptify */
+  S.voters = { h: { id: 'h', list: 'mvr', email: 'hand@x.example', name: 'Hand Added', company: 'X', role: 'MVR', code: 'HCODE' }, old: { id: 'old', list: 'mvr', email: 'gone@y.example', name: 'Gone', company: 'Y', role: 'MVR', code: 'GCODE', source: 'aptify' }, keep: { id: 'keep', list: 'mvr', email: 'keep@z.example', name: 'Keep Me', company: 'Z Old', role: 'MVA', code: 'KCODE', source: 'aptify' } };
+  S.voterpull = { main: { ok: true, receivedAt: '2026-11-23T11:20:00Z', count: 2, rows: [ { email: 'keep@z.example', name: 'Keep Me', company: 'Z Bank', role: 'MVR' }, { email: 'new@w.example', name: 'New Person', company: 'W', role: 'MVA' } ] } };
+  S.settings.automation = {};
+  const vr = await applyVoterPull(true);
+  const keep = S.voters.keep;
+  ok('the Aptify list adds, updates and sets aside, keeping links and hand-added people', vr && vr.added === 1 && vr.updated === 1 && vr.removed === 1 && keep.code === 'KCODE' && keep.role === 'MVR' && keep.company === 'Z Bank' && !!S.voters.h && !S.voters.old && vals('voters').some(v => v.email === 'new@w.example' && v.code));
+  /* Business Domain results go to MBA Legal */
+  S.settings.automation = { legal: { name: 'Justin Wiseman', email: 'legal@x.example' } };
+  const dc = { id: 'dt', type: 'domain', year: 2027, closeTime: '17:00', dates: { ballotOpen: '2026-12-14', ballotClose: '2026-12-18', audit: '2026-12-21', certDue: '2026-12-22', announce: '2026-12-23' } };
+  const hd = draftsFor(dc, RULES.find(r => r[0] === 'legalHeads' && r[1] === 'domain'))[0];
+  const cd = draftsFor(dc, RULES.find(r => r[0] === 'certify' && r[1] === 'domain'));
+  ok('Business Domain results have a heads-up and a request to certify for MBA Legal', hd && hd.to[0].email === 'legal@x.example' && /^Hi Justin/.test(hd.body) && /5 p\.m\. Eastern/.test(hd.body) && /December 21/.test(hd.body) && /December 22/.test(hd.body) && cd.length === 1 && /Business Domain/.test(cd[0].subject));
+  /* past elections, read-only */
+  S.archive = { 'archive/2024-domain': { id: '2024-domain', cycle: '2024-domain', type: 'domain', year: 2024, final: true, finalBy: 'Jonna', dates: { results: '2023-12-07' }, results: [{ seat: 'Data · Chair', count: 1, elected: [{ name: 'Ann Lee', company: 'Bank A' }] }], counts: { votes: 3 }, file: 'arch-2024-domain', archivedAt: '2026-01-15T15:23:00Z' } };
+  renderPast(); ok('past elections list what was archived', /2024/.test(document.querySelector('#page-past').textContent) && /3/.test(document.querySelector('#page-past').textContent));
+  return res;
+});
+let bad = 0; for (const [k, v] of Object.entries(r)) { console.log(v ? 'ok  ' : 'FAIL', k); if (!v) bad++; }
+if (errs.length) { console.log('Page errors:', errs.join(' | ')); bad++; }
+await b.close(); console.log(bad ? bad + ' failed' : 'All election tests passed'); process.exit(bad ? 1 : 0);
