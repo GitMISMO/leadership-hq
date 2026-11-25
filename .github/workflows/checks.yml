@@ -1,5 +1,6 @@
 # Automatic checks on every change to Leadership HQ: the page's scripts parse, nothing secret is in
-# the repository, the public ballot files are valid, and made-up elections count correctly.
+# the repository, the public ballot files are valid, made-up elections count correctly, and the browser's
+# Back button steps through pages and closes the right-hand panel (with the live /assets/back.js).
 name: Checks
 on:
   push:
@@ -23,3 +24,5 @@ jobs:
           npm install --no-save --silent playwright@1.48.2
           npx playwright install --with-deps chromium > /dev/null
           node tests/election.mjs
+      - name: The browser's Back button
+        run: node tests/back.mjs

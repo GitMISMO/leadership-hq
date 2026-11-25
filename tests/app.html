@@ -1,5 +1,26 @@
 <title>Artifact - Leadership HQ</title>
 <link rel="icon" type="image/png" sizes="48x48" href="https://resources.mismo.org/assets/favicon-48x48.png">
+<script src="/assets/back.js"></script>
+<script>
+/* The browser's Back button (CN-033, Jonna, Nov 25, 2026): Back steps to the last page you were on in
+   the left menu, and first closes the right-hand panel if one is open, exactly as its Close button
+   does (so unsaved changes are asked about first). The shared helper is /assets/back.js (owned by
+   Forms and shared pages; never copy it here). Leadership HQ has one layer: the right-hand panel.
+   back.js tries close() a few times in quick succession; a panel with unsaved changes asks once
+   ("Press Close again to leave without saving") and stays open, so only a second Back leaves it. */
+(function(){
+  if(!window.MismoBack) return;
+  let asked=0;
+  MismoBack.layer({ isOpen:()=>{ const p=document.getElementById('pane'); return !!p && p.classList.contains('open'); },
+    close:()=>{
+      if(typeof closePane!=='function') return;
+      const dirty=typeof PANE!=='undefined' && PANE && PANE.dirty;
+      if(dirty && Date.now()-asked<1000) return;
+      if(dirty) asked=Date.now();
+      closePane();
+    } });
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
 <style>
 /* Layout: Summit HQ's family — navy masthead, navy left rail of sections, one page per section, records open in a wide right-hand panel. */
@@ -1591,13 +1612,13 @@ function openPane(cfg){
   (cfg.buttons||[]).forEach((x,i)=>{ f.querySelector('[data-pb="'+i+'"]').onclick=async()=>{ const v=readFields(cfg.fields); if(v===null) return; try{ await x.run(v); if(PANE) PANE.dirty=false; }catch(e){ const m=$("#pf-msg"); if(m && e && e.message) m.textContent=e.message; } }; });
   if(cfg.del){ const d=$("#pf-del"); d.onclick=async()=>{ if(d.dataset.sure){ try{ await cfg.del(); }catch(e){ const m=$("#pf-msg"); if(m) m.textContent=(e&&e.message)||"Couldn't do that."; delete d.dataset.sure; d.textContent=cfg.delLabel||"Delete"; return; } toast(cfg.delLabel==="Archive"?"Archived":(cfg.delDone||"Deleted")); closePane(true); } else { d.dataset.sure="1"; d.textContent="Press Again to "+(cfg.delLabel||"Delete"); setTimeout(()=>{ if(d){ delete d.dataset.sure; d.textContent=cfg.delLabel||"Delete"; } },3500); } }; }
   if(cfg.after) cfg.after(b);
-  const p=$("#pane"); p.classList.add("open"); p.setAttribute("aria-hidden","false");
+  const p=$("#pane"); p.classList.add("open"); p.setAttribute("aria-hidden","false"); if(window.MismoBack) MismoBack.check();
   b.scrollTop=0;
   setTimeout(()=>{ const first=b.querySelector("input:not([type=checkbox]):not([type=radio]),textarea,select"); if(first && !cfg.noFocus) try{ first.focus({preventScroll:true}); }catch(e){} },230);
 }
 function closePane(force){
   if(PANE && PANE.dirty && !force){ const m=$("#pf-msg"); if(m && !m.dataset.warned){ m.dataset.warned="1"; m.textContent="You have changes that aren't saved. Press Close again to leave without saving."; return; } }
-  PANE=null; const p=$("#pane"); p.classList.remove("open"); p.setAttribute("aria-hidden","true");
+  PANE=null; const p=$("#pane"); p.classList.remove("open"); p.setAttribute("aria-hidden","true"); if(window.MismoBack) MismoBack.check();
 }
 const CAL_SVG='<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>';
 const GRIP='<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="5" cy="3" r="1.3"/><circle cx="11" cy="3" r="1.3"/><circle cx="5" cy="8" r="1.3"/><circle cx="11" cy="8" r="1.3"/><circle cx="5" cy="13" r="1.3"/><circle cx="11" cy="13" r="1.3"/></svg>';
@@ -4497,6 +4518,7 @@ const HELP=[
   ["Voting","Ballot receipts",'<p>After voting, the ballot page always shows a receipt number and the choices made. Emailed receipts are switched on or off in <b>Public Forms › Ballot Receipts</b>. When on, a ballot cast with a personal link gets a receipt from the elections mailbox, sent to the address on the voter list, once per link. Open ballots (workgroup elections) get the on-page receipt only, so the form can\'t be used to send email to someone else.</p>'],
   ["Voting","Loading the MVR and MVA list",'<p>In Aptify, each member company\'s MISMO Voting Representative and MISMO Voting Alternate are contact functions. Run the voting representatives report, copy the rows from Excel with the header row, and use <b>Voter Lists › Paste a List</b>. It reads the report\'s columns (First Name, Last Name, Primary Email, ShipToCompany, Other Function) and keeps only Voting Representatives and Alternates. <b>Replace the list</b> keeps everyone\'s ballot link if they are still on it; people no longer on it are set aside and can be brought back from System Health.</p>'],
   ["Getting Started","Workgroup elections",'<p>When a Development Workgroup or Community of Practice sends in its nominees outside the yearly cycle (for example Perry\'s request for the eNote Master Control Agreement DWG), open <b>Workgroup Elections</b> and press <b>Request an Election</b>. Fill in the group, the voting dates and closing time (noon Eastern unless they ask otherwise) and each nominee with their position, then say how many to elect for each position.</p><p>Saving publishes the online ballot (resources.mismo.org/forms/elections/ballot/?e=&lt;election&gt;) and puts a <b>Call for Vote</b> (the day voting opens) and a <b>Reminder to Vote</b> (the day before it closes) in the Outbox for you to send. Add the group\'s MISMO Connect address there or on the request. The ballot closes itself at the closing time.</p><p>One vote per member company, as always: duplicates are held for you to settle under <b>Ballots</b>. Ballots emailed to info@mismo.org go in with <b>+ Ballot Sent by Email</b>. When voting closes, press <b>Mark Results Final</b>, then <b>Apply to the Roster</b> and <b>Results Email</b>.</p>'],
+  ["Getting Started","The browser\'s Back button",'<p>The browser\'s <b>Back</b> button goes to the last page you were on and closes an open panel first; it never undoes a change. If the panel has changes that aren\'t saved, it asks first, just as Close does. <b>Forward</b> goes again.</p>'],
   ["Getting Started","How Leadership HQ is laid out",'<p>Each election has its own page: <b>Business Domains</b>, <b>Areas of Focus</b>, the <b>Governance Committee</b> and the <b>Board of Directors</b>. The pages under Running the Elections work across all of them: Nominations, Ballots and Results, the <b>Outbox</b>, Timeline and Tasks, Communications and Onboarding. Records holds the Structure, the Leadership Roster, Voter Lists and the Public Forms.</p><p>An election year is the year terms begin: the 2027 election year runs nominations and voting in the fall of 2026, and uses 2026 attendance from Meeting Trackers.</p><p>Pages with an <b>(i)</b> beside the title show what MISMO\'s Bylaws say about that election.</p>'],
   ["Getting Started","The new structure",'<p>Communities of Practice become <b>Areas of Focus</b> (standing spaces to collaborate) and Development Workgroups become <b>Task Forces</b> (each builds one product and wraps up when the domain decides the work is done). Each sits in one of eight <b>Business Domains</b>, which own the work: they review and approve it and decide which Areas of Focus and Task Forces they need. The Council of Chairs is the Domain Chairs. Business Glossary and Business Process Model become MISMO tools, stewarded through the Governance Committee, and with Information Management and Architecture they are led by Governance Committee members.</p><p>Groups archived in Meeting Trackers or Higher Logic (Fee Modernization, for one) are marked inactive on the Structure page.</p>'],
   ["Getting Started","Starting a new year",'<p>On the Election Year page, press <b>Start the Next Election Year</b>. Business Domain dates move forward a year onto the same weekday, tasks are copied with every box unticked, and two seats (Chair and Vice Chair) are built for every Business Domain. Areas of Focus and the Governance Committee are set up as appointed, with no seats or ballots. After that, every date is yours to change.</p>'],
