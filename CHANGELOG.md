@@ -2,6 +2,9 @@
 
 One line per change people would notice. Newest first.
 
+## November 26, 2026
+- Masthead matches the other MISMO tools: the same bar, logo box, divider and name as Certification Management, so the MISMO logo sits in the same spot in every tool (bar now 68px; the left menu, record panel and Help menu line up under it). The old December hat is gone; the shared /assets/holiday.js handles December for every tool (CN-053).
+
 ## November 25, 2026
 - The browser's Back button now works: Back goes to the last page you were on and closes an open panel first (asking first if it has unsaved changes); it never undoes a change. Forward goes again. Uses the shared resources.mismo.org/assets/back.js (CN-033).
 - Browser tab icon now matches mismo.org (the shared icon at resources.mismo.org/assets/favicon-48x48.png).
